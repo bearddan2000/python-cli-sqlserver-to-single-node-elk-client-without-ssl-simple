@@ -1,0 +1,90 @@
+version: "3.4"
+
+services:
+
+  db:
+    build: db
+
+  py-srv:
+    build: py-srv
+    healthcheck:
+      test: "exit 0"
+    command: sh -c "/wait && python app.py"
+    environment:
+      - INDEX_NAME=${INDEX_NAME}
+      - WAIT_HOSTS=elasticsearch:9200
+      - WAIT_HOSTS_TIMEOUT=300
+      - WAIT_SLEEP_INTERVAL=30
+      - WAIT_HOST_CONNECT_TIMEOUT=30
+    depends_on:
+      - elasticsearch
+    links:
+      - "elasticsearch:elasticsearch"
+
+  es1:
+    image: elasticsearch:${STACK_VERSION}
+    container_name: es1
+    hostname: es1
+    restart: unless-stopped
+    healthcheck:
+      test: "exit 0"
+    environment:
+      - "node.store.allow_mmap=false"
+      - "node.name=es1"
+      - "bootstrap.memory_lock=true"
+      - "cluster.name=es-cluster"
+      - "discovery.seed_hosts=es2,es3"
+      - "cluster.initial_master_nodes=es1,es2,es3"
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -Des.index.number_of_replicas=0"
+      - "xpack.security.enabled=false"
+      - "xpack.security.http.ssl.enabled=false"
+      - "xpack.security.transport.ssl.enabled=false"
+      - "xpack.ml.enabled=false"
+      - "xpack.graph.enabled=false"
+      - "xpack.watcher.enabled=false"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - 9200:9200
+    # volumes:
+    #  - ./es/es1/data:/usr/share/elasticsearch/data
+    #  - ./es/es1/log:/usr/share/elasticsearch/log
+
+  logstash:
+    build: logstash
+    ports:
+      - "9600:9600"
+    command: sh -c "/wait && logstash -f /usr/share/logstash/pipeline/mystash.conf"
+    environment:
+      - DB_DRIVER=${DB_DRIVER}
+      - DB_USER=${DB_USER}
+      - DB_CONNECTION=${DB_CONNECTION}
+      - DB_STATEMENT=${DB_STATEMENT}
+      - INDEX_NAME=${INDEX_NAME}
+      - STACK_VERSION=${STACK_VERSION}
+      - WAIT_HOSTS=db:1433,elasticsearch:9200
+      - WAIT_HOSTS_TIMEOUT=300
+      - WAIT_SLEEP_INTERVAL=30
+      - WAIT_HOST_CONNECT_TIMEOUT=30
+      - 'HEAP_SIZE:1g'
+      - 'LS_JAVA_OPTS=-Xms1g -Xmx1g'
+    depends_on:
+      - db
+      - elasticsearch
+    links:
+      - "db:db"
+      - "elasticsearch:elasticsearch"
+
+  kibana:
+    image: kibana:${STACK_VERSION}
+    healthcheck:
+      test: "exit 0"
+    environment:
+      - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
+      - "SERVER_NAME=127.0.0.1"
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
